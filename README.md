@@ -1,11 +1,10 @@
 # DeepSeek 流式聊天 API
-一个基于 **FastAPI** 的聊天接口，调用 **DeepSeek API**，支持 **SSE 流式返回**（打字机效果），并附带一个简单的浏览器聊天页面。
+一个基于 **FastAPI** 的聊天接口，调用 **DeepSeek API**，支持 **SSE 流式返回**（打字机效果）。
 
 ## ✨ 功能
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/` | GET | 浏览器聊天页面，可体验打字机效果 |
 | `/ping` | GET | 健康检查，返回 `{"msg":"pong"}` |
 | `/chat` | POST | 发送消息，流式返回 DeepSeek 回复 |
 | `/docs` | GET | FastAPI 自动生成的接口文档 |
@@ -42,9 +41,8 @@
     httpx.AsyncClient — 异步 HTTP 客户端的使用
     SSE 流式响应 — 与普通 JSON 响应的区别：生成一点发一点，不等全部完成
     git / GitHub — 版本管理与代码托管
-1. 流式里 token 用量打印不出来 → 原因和怎么解的
-2. .env 的 key 读不到 → 用 python-dotenv
-3. requirements.txt 中文注释导致 GBK 编码炸 → 配置类文件保持纯 ASCII
+        "DeepSeek 最后一块 choices 为空 → choices[0] 抛 IndexError 被 except 吞 → 解法：usage 和取 delta 拆开、精确捕获"
+        "requirements.txt 中文注释 → GBK 解码炸 → 配置文件保持纯 ASCII"
 
 ## 🛠 技术栈
 - **FastAPI** — Web 框架

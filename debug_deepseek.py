@@ -3,7 +3,7 @@
 #   .venv\Scripts\python.exe debug_deepseek.py
 
 import os
-import httpx
+import httpx # type: ignore
 
 key = os.environ.get("DEEPSEEK_API_KEY", "")
 print("1. 终端里是否读到了 key:", "是(长度 %d)" % len(key) if key else "否 ← 问题在这!")

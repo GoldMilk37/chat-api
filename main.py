@@ -4,21 +4,18 @@ import httpx  # type: ignore  # HTTP 客户端，用来发请求给 DeepSeek
 from fastapi import FastAPI  # type: ignore
 from fastapi.responses import StreamingResponse  # type: ignore
 from pydantic import BaseModel  # type: ignore  # 导入 Pydantic
-from dotenv import load_dotenv  # 从 .env 文件读取变量
+from dotenv import load_dotenv  # type: ignore # 从 .env 文件读取变量
 
 load_dotenv()  # 启动时把 .env 里的 DEEPSEEK_API_KEY 加载进环境变量
 
 app = FastAPI()
 
-
 class ChatRequest(BaseModel):  # ② 定义请求体的"形状"
     message: str  # 告诉 FastAPI，来请求的人必须发 {"message": "字符串"}
 
-
-@app.get("/ping")  # 装饰器，注册一个接口
+@app.get("/ping")  # 装饰器，注册一个接口    "/ping" 是请求目录  “/” 是根目录
 def ping():  # 定义一个函数从服务器拿数据（比如访问 /ping）
     return {"msg": "pong"}  # 接口返回的内容
-
 
 @app.post("/chat")  # ③ POST 接口，路径 /chat  给服务器送数据（比如发聊天消息）
 async def chat(req: ChatRequest):  # async def 异步函数；参数类型是 ChatRequest
@@ -65,7 +62,7 @@ async def chat(req: ChatRequest):  # async def 异步函数；参数类型是 Ch
                                 yield delta["content"]  # yield：函数暂停，把当前值发出去，然后继续执行下一行
 
     return StreamingResponse(generate(), media_type="text/event-stream")
-    # StreamingResponse：FastAPI 提供的特殊响应类型，把生成器里的内容一段一段发给浏览器，而不是等生成器结束才发
+    # StreamingResponse   是FastAPI 提供的特殊响应类型，把生成器里的内容一段一段发给浏览器，而不是等生成器结束才发
 
 
 # 启动方式：

@@ -84,14 +84,14 @@ def ping():  # 定义一个函数从服务器拿数据（比如访问 /ping）
 
 @app.post("/chat")  # POST 接口，路径 /chat  给服务器送数据（比如发聊天消息）
 async def chat(req: ChatRequest):  # async def 异步函数；参数类型是 ChatRequest
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")#从环境变量里读密钥
     if not api_key:  # 没配 key 时给个明白的提示，而不是悄悄 401
         return {"error": "没找到 DEEPSEEK_API_KEY：请在 Chat-API 目录下新建 .env 文件，写入一行 DEEPSEEK_API_KEY=sk-你的key"}
 
-    session_id = req.session_id or str(uuid.uuid4())  # 新增：没传 session_id 就自动生成一个
+    session_id = req.session_id or str(uuid.uuid4())  # 新增：传了就用传过来的没传 session_id 就自动生成一个
 
-    async def generate():
-        full_reply = ""  # 新增：收集完整回复，流结束后存入 session
+    async def generate():  #`generate()` 是一个 async 生成器，每收到 DeepSeek 的一个分片（chunk）就 `yield` 一次，FastAPI 会立刻把这一小段推送给前端，所以用户能看到字一个个蹦出来。
+        full_reply = ""  # 累积完整回复，流结束后存入 session
 
         async with httpx.AsyncClient(timeout=30) as client:  # timeout=30 防 DeepSeek 卡死导致接口一直挂着
             async with client.stream(
@@ -109,26 +109,26 @@ async def chat(req: ChatRequest):  # async def 异步函数；参数类型是 Ch
                     "stream": True
                 }
             ) as response:
-                async for chunk in response.aiter_lines():
-                    if chunk.startswith("data: "):
-                        data = chunk[6:]
+                async for chunk in response.aiter_lines():#chunk 是一行一行的流式数据|response.aiter_lines()  按行读取响应内容
+                    if chunk.startswith("data: "):#  "data: " 是SSE（Server-Sent Events）格式的数据前缀
+                        data = chunk[6:] # 切片，提取 "data: " 后面的 JSON 字符串
                         if data == "[DONE]":
                             break
                         try:
-                            parsed = json.loads(data)
+                            parsed = json.loads(data) # 解析 JSON 字符串为 Python 对象
                         except json.JSONDecodeError:  # 只吞"不是 JSON"这一种，其他异常让它浮出来
                             continue
 
-                        # 先独立处理 usage：DeepSeek 把用量放在"choices 为空"的最后一块里
+                        # 先独立处理 usage：Token 用量在usage里面 （DeepSeek 把用量放在"choices 为空"的最后一块里）
                         if "usage" in parsed:
                             print(f"Token 用量: {parsed['usage']}")
 
                         # 再处理回答内容：最后一块的 choices 是空的，必须先进 if 判断
                         choices = parsed.get("choices")
                         if choices:
-                            delta = choices[0].get("delta", {})
+                            delta = choices[0].get("delta", {}) #choices[0]选择ai的第一个回答
                             if "content" in delta:
-                                full_reply += delta["content"]  # 新增：累积完整回复
+                                full_reply += delta["content"]  # 累积完整回复
                                 yield delta["content"]  # yield：函数暂停，把当前值发出去，然后继续执行下一行
 
         # 新增：流结束后把本轮对话存入 session
@@ -146,8 +146,8 @@ async def chat(req: ChatRequest):  # async def 异步函数；参数类型是 Ch
 # ============================================================
 # ⑤ 新增接口：/analyze（结构化输出）
 # ============================================================
-
-ANALYZE_SYSTEM_PROMPT = """  # 新增：情感分析的 System Prompt
+# 新增：情感分析的 System Prompt  告诉 AI 它的角色和判断标准
+ANALYZE_SYSTEM_PROMPT = """  
 你是一个专业的情感分析引擎。
 
 分析用户输入的文本，判断其情感倾向。
@@ -161,91 +161,93 @@ keywords 字段要求：
 - 提取文本中最能支撑你判断的关键词
 - 数量 1-5 个
 - 按重要性从高到低排列
-"""  # 新增
+"""  
+
+#构建结构化Prompt|调用这个函数的时候会把ANALYZE_SYSTEM_PROMPT 作为system_prompt传入
+                #再加上Pydantic Schema 和规则约束 就是完整的提示词了
+def build_structured_prompt(system_prompt: str, schema: type[BaseModel]) -> str:  # 返回类型：str，返回构建好的完整提示词
+    """把 Pydantic Schema 嵌入提示词，生成完整的 System Prompt"""  
+    schema_json = schema.model_json_schema()  
+    # schema.model_json_schema() 是 Pydantic 的内置方法，将 Pydantic 模型定义，转换成 JSON Schema 格式的字典。
+    schema_text = json.dumps(schema_json, ensure_ascii=False, indent=2) 
+    # 使用 json.dumps() 将字典转换为 JSON 字符串 |ensure_ascii=False：保留中文等非 ASCII 字符，不转义|indent=2 首行缩进
+    return f"""  
+            {system_prompt}  
+
+            【输出格式要求】  
+            你必须输出一个 JSON 对象，严格符合以下 JSON Schema：  
+
+            {schema_text}  
+
+            【硬性规则】  
+            - 只输出 JSON 对象，不要有任何解释性文字、前缀或后缀  
+            - 不要用 ```json 代码块包裹  
+            - 所有字段必须填写，不能省略  
+            - confidence 字段表示你对自己判断的把握程度  
+            """ 
 
 
-def build_structured_prompt(system_prompt: str, schema: type[BaseModel]) -> str:  # 新增：把 Pydantic Schema 嵌入提示词
-    """把 Pydantic Schema 嵌入提示词，生成完整的 System Prompt"""  # 新增
-    schema_json = schema.model_json_schema()  # 新增：Pydantic 自动生成 JSON Schema
-    schema_text = json.dumps(schema_json, ensure_ascii=False, indent=2)  # 新增：转成格式化字符串
+def clean_json_response(text: str) -> str:  # 清洗 LLM 输出
+    """清洗 LLM 输出，去掉可能的 markdown 代码块包裹"""  
+    text = text.strip()  
+    if text.startswith("```"):  #如果以 ``` 开头
+        lines = text.split("\n")  
+        lines = [l for l in lines if not l.strip().startswith("```")]  # 过滤掉代码块标记行
+        text = "\n".join(lines)  
+    return text.strip()  
+
+
+@app.post("/analyze", response_model=AnalyzeResponse)  
+async def analyze(req: AnalyzeRequest):  
+    """情感分析接口，返回 Pydantic 验证过的结构化结果"""  
     
-    return f"""  # 新增
-{system_prompt}  # 新增
-
-【输出格式要求】  # 新增
-你必须输出一个 JSON 对象，严格符合以下 JSON Schema：  # 新增
-
-{schema_text}  # 新增
-
-【硬性规则】  # 新增
-- 只输出 JSON 对象，不要有任何解释性文字、前缀或后缀  # 新增
-- 不要用 ```json 代码块包裹  # 新增
-- 所有字段必须填写，不能省略  # 新增
-- confidence 字段表示你对自己判断的把握程度  # 新增
-"""  # 新增
-
-
-def clean_json_response(text: str) -> str:  # 新增：清洗 LLM 输出
-    """清洗 LLM 输出，去掉可能的 markdown 代码块包裹"""  # 新增
-    text = text.strip()  # 新增
-    if text.startswith("```"):  # 新增：如果以 ``` 开头
-        lines = text.split("\n")  # 新增
-        lines = [l for l in lines if not l.strip().startswith("```")]  # 新增：过滤掉代码块标记行
-        text = "\n".join(lines)  # 新增
-    return text.strip()  # 新增
-
-
-@app.post("/analyze", response_model=AnalyzeResponse)  # 新增：POST 接口 /analyze
-async def analyze(req: AnalyzeRequest):  # 新增
-    """情感分析接口，返回 Pydantic 验证过的结构化结果"""  # 新增
-    
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "")  # 新增
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")   
     if not api_key:  # 新增
-        raise HTTPException(status_code=500, detail="没找到 DEEPSEEK_API_KEY")  # 新增
+        raise HTTPException(status_code=500, detail="没找到 DEEPSEEK_API_KEY")  
 
     # 1. 构建嵌入了 Schema 的完整提示词
-    full_prompt = build_structured_prompt(ANALYZE_SYSTEM_PROMPT, SentimentResult)  # 新增
+    full_prompt = build_structured_prompt(ANALYZE_SYSTEM_PROMPT, SentimentResult)  
 
     # 2. 调用 DeepSeek（非流式，因为我们要完整 JSON）
-    async with httpx.AsyncClient(timeout=60) as client:  # 新增：timeout 给足 60 秒
-        response = await client.post(  # 新增：非流式请求
-            "https://api.deepseek.com/chat/completions",  # 新增
-            headers={  # 新增
-                "Authorization": f"Bearer {api_key}",  # 新增
-                "Content-Type": "application/json"  # 新增
-            },  # 新增
-            json={  # 新增
-                "model": "deepseek-chat",  # 新增
-                "messages": [  # 新增
-                    {"role": "system", "content": full_prompt},  # 新增
-                    {"role": "user", "content": req.text}  # 新增
-                ],  # 新增
-                "stream": False  # 新增：关键！非流式，等完整结果
-            }  # 新增
-        )  # 新增
+    async with httpx.AsyncClient(timeout=60) as client:  # timeout 给足 60 秒
+        response = await client.post(  # 非流式请求
+            "https://api.deepseek.com/chat/completions",  
+            headers={  
+                "Authorization": f"Bearer {api_key}",  
+                "Content-Type": "application/json"  
+            },  
+            json={  
+                "model": "deepseek-chat",  
+                "messages": [  
+                    {"role": "system", "content": full_prompt},  
+                    {"role": "user", "content": req.text}  
+                ],  
+                "stream": False  # 关键！非流式，等完整结果
+            }  
+        )  
 
-    if response.status_code != 200:  # 新增：DeepSeek 返回非 200 时
+    if response.status_code != 200:  # DeepSeek 返回非 200 时
         raise HTTPException(status_code=502, detail=f"DeepSeek 调用失败: {response.text}")  # 新增
 
     # 3. 提取模型输出的文本
-    data = response.json()  # 新增
-    raw_content = data["choices"][0]["message"]["content"]  # 新增
+    data = response.json()  
+    raw_content = data["choices"][0]["message"]["content"]  
 
-    print(f"[analyze] 模型原始输出:\n{raw_content}\n")  # 新增：调试用，终端里能看到模型到底输出了什么
+    print(f"[analyze] 模型原始输出:\n{raw_content}\n")  # 调试用，终端里能看到模型到底输出了什么
 
     # 4. 清洗 + Pydantic 验证
-    cleaned = clean_json_response(raw_content)  # 新增
+    cleaned = clean_json_response(raw_content)  
 
-    try:  # 新增
-        result = SentimentResult.model_validate_json(cleaned)  # 新增：Pydantic 验证并解析
-    except ValidationError as e:  # 新增：模型输出不合规时
-        raise HTTPException(  # 新增
-            status_code=502,  # 新增
-            detail=f"模型输出格式不符合 Schema: {e.errors()}"  # 新增
-        )  # 新增
+    try:  
+        result = SentimentResult.model_validate_json(cleaned)  # Pydantic 验证并解析
+    except ValidationError as e:  # 模型输出不合规时
+        raise HTTPException(  
+            status_code=502,  
+            detail=f"模型输出格式不符合 Schema: {e.errors()}"  
+        )  
 
     # 5. 返回结构化结果
-    return AnalyzeResponse(result=result, model="deepseek-chat")  # 新增
+    return AnalyzeResponse(result=result, model="deepseek-chat")  
 
 
 # ============================================================

@@ -43,6 +43,21 @@
     git / GitHub — 版本管理与代码托管
         "DeepSeek 最后一块 choices 为空 → choices[0] 抛 IndexError 被 except 吞 → 解法：usage 和取 delta 拆开、精确捕获"
         "requirements.txt 中文注释 → GBK 解码炸 → 配置文件保持纯 ASCII"
+    
+    流式输出的一行chunk（数据块）
+                    └── choices（选择数组，通常1个）
+                    ├── index（索引：0, 1, 2...）
+                    └── delta（增量内容）
+                        ├── role（角色，通常只在第一块）
+                        └── content（文本片段）
+    
+    Pydantic Schema 就是使用 Pydantic 的 BaseModel 定义的数据模型，它提供了：
+        ✅ 类型检查
+        ✅ 数据验证
+        ✅ 自动转换（如字符串 "123" 转为整数 123）
+        ✅ JSON 序列化
+        ✅ 文档生成
+        在 FastAPI 等现代 Python Web 框架中，Schema 是定义 API 接口数据格式的标准方式。
 
 ## 🛠 技术栈
 - **FastAPI** — Web 框架

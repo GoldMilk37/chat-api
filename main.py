@@ -46,14 +46,14 @@ class SentimentResult(BaseModel):  # 新增：情感分析结构化结果
     )  # 新增
     keywords: List[str] = Field(  # 新增
         description="支撑判断的关键词，1-5个",  # 新增
-        min_length=1,  # 新增
-        max_length=5   # 新增
+        min_length=1,  
+        max_length=5   
     )  # 新增
 
 
-class AnalyzeResponse(BaseModel):  # 新增：/analyze 响应体
-    result: SentimentResult = Field(description="结构化分析结果")  # 新增
-    model: str = Field(description="使用的模型名称")  # 新增
+class AnalyzeResponse(BaseModel):  # /analyze 响应体
+    result: SentimentResult = Field(description="结构化分析结果")  
+    model: str = Field(description="使用的模型名称")  
 
 
 # ============ 新增：Function Calling 请求模型 ============
@@ -186,14 +186,15 @@ def build_structured_prompt(system_prompt: str, schema: type[BaseModel]) -> str:
             - confidence 字段表示你对自己判断的把握程度  
             """ 
 
-
-def clean_json_response(text: str) -> str:  # 清洗 LLM 输出
+# 清洗 LLM 输出  因为LLM（大语言模型）在输出 JSON 时，常常会“自作主张”地用 Markdown 代码块包裹
+def clean_json_response(text: str) -> str:  
     """清洗 LLM 输出，去掉可能的 markdown 代码块包裹"""  
-    text = text.strip()  
+    text = text.strip()  #去除字符串开头和结尾的空白字符
     if text.startswith("```"):  #如果以 ``` 开头
         lines = text.split("\n")  
         lines = [l for l in lines if not l.strip().startswith("```")]  # 过滤掉代码块标记行
-        text = "\n".join(lines)  
+        #找到l开头结尾的空白并且以 ``` 开头的行  （然后not取反  过滤掉）
+        text = "\n".join(lines)  # "\n".join(lines) 是 Python 中用于将列表中的字符串元素用换行符连接成一个字符串的常用操作。
     return text.strip()  
 
 
@@ -202,14 +203,14 @@ async def analyze(req: AnalyzeRequest):
     """情感分析接口，返回 Pydantic 验证过的结构化结果"""  
     
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")   
-    if not api_key:  # 新增
+    if not api_key:  
         raise HTTPException(status_code=500, detail="没找到 DEEPSEEK_API_KEY")  
 
     # 1. 构建嵌入了 Schema 的完整提示词
     full_prompt = build_structured_prompt(ANALYZE_SYSTEM_PROMPT, SentimentResult)  
 
     # 2. 调用 DeepSeek（非流式，因为我们要完整 JSON）
-    async with httpx.AsyncClient(timeout=60) as client:  # timeout 给足 60 秒
+    async with httpx.AsyncClient(timeout=60) as client:  #AsyncClient：异步版本的 HTTP 客户端  timeout 给足 60 秒   as client将客户端实例赋值给变量 client
         response = await client.post(  # 非流式请求
             "https://api.deepseek.com/chat/completions",  
             headers={  
@@ -227,10 +228,10 @@ async def analyze(req: AnalyzeRequest):
         )  
 
     if response.status_code != 200:  # DeepSeek 返回非 200 时
-        raise HTTPException(status_code=502, detail=f"DeepSeek 调用失败: {response.text}")  # 新增
+        raise HTTPException(status_code=502, detail=f"DeepSeek 调用失败: {response.text}")  
 
     # 3. 提取模型输出的文本
-    data = response.json()  
+    data = response.json()  #将 HTTP 响应体从 JSON 字符串解析为 Python 字典
     raw_content = data["choices"][0]["message"]["content"]  
 
     print(f"[analyze] 模型原始输出:\n{raw_content}\n")  # 调试用，终端里能看到模型到底输出了什么
@@ -239,7 +240,7 @@ async def analyze(req: AnalyzeRequest):
     cleaned = clean_json_response(raw_content)  
 
     try:  
-        result = SentimentResult.model_validate_json(cleaned)  # Pydantic 验证并解析
+        result = SentimentResult.model_validate_json(cleaned)  # Pydantic 模型的 model_validate_json 方法 验证并解析
     except ValidationError as e:  # 模型输出不合规时
         raise HTTPException(  
             status_code=502,  
@@ -292,11 +293,13 @@ async def chat_with_tools(req: FunctionCallRequest):
                 yield f"❌ DeepSeek 调用失败: {response.text}"
                 return
             
-            data = response.json()
+            data = response.json()  #将 HTTP 响应体从 JSON 字符串解析为 Python 字典
             message = data["choices"][0]["message"]
             
             # 检查是否需要调用工具
             if "tool_calls" in message and message["tool_calls"]:
+                #"tool_calls" in message：检查 message 字典中是否有 tool_calls 键（如果有工具需求模型自动返回） 
+                # message["tool_calls"]：检查该键对应的值是否非空
                 yield "🔧 检测到工具调用需求\n\n"
                 
                 # 准备消息历史
@@ -307,12 +310,12 @@ async def chat_with_tools(req: FunctionCallRequest):
                 ]
                 
                 # 执行每个工具调用
-                for tool_call in message["tool_calls"]:
-                    function_name = tool_call["function"]["name"]
-                    function_args = json.loads(tool_call["function"]["arguments"])
+                for tool_call in message["tool_calls"]:  #遍历模型请求的所有工具调用每次循环处理一个工具调用
+                    function_name = tool_call["function"]["name"] # 提取工具调用的函数名 从嵌套结构中获取 name 字段
+                    function_args = json.loads(tool_call["function"]["arguments"]) # 提取工具调用函数需要的的参数 arguments 是 JSON 字符串，用 json.loads() 解析为字典
                     
                     yield f"📞 调用工具: {function_name}\n"
-                    yield f"📝 参数: {json.dumps(function_args, ensure_ascii=False)}\n"
+                    yield f"📝 参数: {json.dumps(function_args, ensure_ascii=False)}\n" # ensure_ascii=False：保留原始的非 ASCII 字符（如中文）
                     
                     # 执行函数
                     function_response = tool_executor.execute(function_name, function_args)

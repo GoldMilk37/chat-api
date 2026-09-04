@@ -125,14 +125,14 @@ class ToolExecutor:
             "get_weather": get_weather
         }
     
-    def execute(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+    def execute(self, tool_name: str, arguments: Dict[str, Any]) -> str: # 表示 arguments 是一个字典，其中：键（key）：必须是字符串类型（str）值（value）：可以是任意类型（Any）
         """执行工具函数"""
         if tool_name not in self.function_map:
             return json.dumps({"error": f"未知工具: {tool_name}"}, ensure_ascii=False)
         
         try:
-            func = self.function_map[tool_name]
-            result = func(**arguments)
+            func = self.function_map[tool_name] # 从映射表中获取对应的函数对象 赋值给变量 func
+            result = func(**arguments) # **arguments：将参数字典解包为关键字参数执行结果赋值给 result
             return json.dumps({"result": result}, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"error": f"执行错误: {str(e)}"}, ensure_ascii=False)
